@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Trackline userscript smoke fixture</title>
+  <style>
+    body { font-family: sans-serif; margin: 30px; }
+    [amt-auto-test-id] { border: 1px solid #ccc; margin: 12px 0; padding: 12px; white-space: pre-line; }
+    [hidden] { display: none !important; }
+  </style>
+  <script>
+    window.__tracklineStore = {};
+    window.__tracklineNotifications = [];
+    window.GM_getValue = (key, fallback) => window.__tracklineStore[key] ?? fallback;
+    window.GM_setValue = (key, value) => { window.__tracklineStore[key] = value; };
+    window.GM_notification = (notification) => {
+      window.__tracklineNotifications.push(notification);
+      document.documentElement.dataset.tracklineNotificationCount = String(window.__tracklineNotifications.length);
+      document.documentElement.dataset.tracklineLastNotification = `${notification.title}: ${notification.text}`;
+    };
+    window.GM_registerMenuCommand = () => {};
+  </script>
+</head>
+<body>
+  <main>
+    <h1>Depart Tuesday, September 15, 2026</h1>
+    <button id="simulate-drop" type="button">Simulate 1:15 AM drop</button>
+    <section id="results-page-1">
+      <div amt-auto-test-id="autoId-one-way-journey-solution-1">NYP to PHL
+Lowest Fare
+101
+Northeast Regional
+DEPARTS
+6:00
+a
+ARRIVES
+7:20
+a
+Trip Details
+Coach
+from
+$
+10
+Business
+from
+$
+60</div>
+    </section>
+    <section id="results-page-2" hidden>
+      <div amt-auto-test-id="autoId-one-way-journey-solution-2">NYP to PHL
+Lowest Fare
+102
+Northeast Regional
+DEPARTS
+11:30
+p
+ARRIVES
+12:50
+a
+Trip Details
+Coach
+from
+$
+20
+Business
+from
+$
+70</div>
+      <div id="late-card" amt-auto-test-id="autoId-one-way-journey-solution-3">NYP to PHL
+Lowest Fare
+103
+Northeast Regional
+DEPARTS
+1:15
+a
+ARRIVES
+2:35
+a
+Trip Details
+Coach
+from
+$
+<span id="late-price">30</span>
+Business
+from
+$
+70</div>
+    </section>
+    <span id="result-summary">Showing 1 - 1 of 3</span>
+    <div id="fixture-pagination">
+      <button type="button"><span aria-label="Page 1 , Current Page">1</span></button>
+      <button type="button"><span aria-label="Page 2">2</span></button>
+    </div>
+  </main>
+  <script>
+    document.getElementById("simulate-drop").addEventListener("click", () => {
+      document.getElementById("late-price").textContent = "15";
+    });
+    for (const button of document.querySelectorAll("#fixture-pagination button")) {
+      button.addEventListener("click", () => {
+        const page = Number(button.querySelector("[aria-label]").getAttribute("aria-label").match(/^Page (\d+)/)[1]);
+        document.getElementById("results-page-1").hidden = page !== 1;
+        document.getElementById("results-page-2").hidden = page !== 2;
+        document.getElementById("result-summary").textContent = page === 1
+          ? "Showing 1 - 1 of 3"
+          : "Showing 2 - 3 of 3";
+        for (const candidate of document.querySelectorAll("#fixture-pagination button")) {
+          const label = candidate.querySelector("[aria-label]");
+          const number = label.getAttribute("aria-label").match(/^Page (\d+)/)[1];
+          label.setAttribute("aria-label", candidate === button
+            ? `Page ${number} , Current Page`
+            : `Page ${number}`);
+        }
+      });
+    }
+  </script>
+  <script src="../../trackline-amtrak.user.js?v=0.5.2"></script>
+</body>
+</html>
