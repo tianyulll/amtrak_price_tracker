@@ -1,8 +1,12 @@
 // ==UserScript==
 // @name         Trackline — Amtrak Fare Watch
 // @namespace    https://github.com/tianyulll/amtrak_price_tracker
-// @version      0.5.2
+// @version      0.5.3
 // @description  Scan all Amtrak result pages and notify when fares meet your target price.
+// @homepageURL  https://github.com/tianyulll/amtrak_price_tracker
+// @supportURL   https://github.com/tianyulll/amtrak_price_tracker/issues
+// @downloadURL  https://raw.githubusercontent.com/tianyulll/amtrak_price_tracker/main/trackline-amtrak.user.js
+// @updateURL    https://raw.githubusercontent.com/tianyulll/amtrak_price_tracker/main/trackline-amtrak.user.js
 // @match        https://www.amtrak.com/tickets/departure.html*
 // @match        https://www.amtrak.com/*/tickets/departure.html*
 // @grant        GM_getValue
@@ -16,7 +20,7 @@
   "use strict";
 
   const CARD_SELECTOR = '[amt-auto-test-id^="autoId-one-way-journey-solution-"]';
-  const SCRIPT_VERSION = "0.5.2";
+  const SCRIPT_VERSION = "0.5.3";
   const FARE_CLASSES = ["Coach", "Business", "First", "Private Rooms"];
   const STORAGE_KEY = "trackline-amtrak-v1";
   const TAB_STORAGE_KEY = "trackline-amtrak-tab-v1";

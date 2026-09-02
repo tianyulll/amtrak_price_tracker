@@ -15,13 +15,13 @@ Everything runs in your normal browser session. There is no server to start, no 
 
 ## Install
 
-1. Install [Tampermonkey](https://www.tampermonkey.net/) in Chrome, Edge, or Firefox.
-2. Open the Tampermonkey dashboard and select **Create a new script**.
-3. Delete the sample code in the editor.
-4. Copy the complete contents of [`trackline-amtrak.user.js`](trackline-amtrak.user.js), paste it into the editor, and save.
-5. Allow browser notifications for Tampermonkey when prompted.
+### [Install Trackline →](https://raw.githubusercontent.com/tianyulll/amtrak_price_tracker/main/trackline-amtrak.user.js)
 
-After installation, the Trackline panel should appear in the lower-right corner of an Amtrak departure-results page. Its header should show **v0.5.2**.
+1. Install [Tampermonkey](https://www.tampermonkey.net/) in Chrome, Edge, or Firefox.
+2. Select **Install Trackline** above, then approve the installation in Tampermonkey.
+3. Open an Amtrak departure-results page and allow browser notifications when prompted.
+
+The Trackline panel should appear in the lower-right corner and show **v0.5.3**. Tampermonkey will check for newer Trackline versions automatically.
 
 ## Watch a trip
 
@@ -59,7 +59,7 @@ Confirm that Tampermonkey is enabled, the script is enabled, and you are on an A
 
 ### The panel shows an older version
 
-Open the script in Tampermonkey, replace all of its contents with the current [`trackline-amtrak.user.js`](trackline-amtrak.user.js), save, and reload the Amtrak tab.
+Open Tampermonkey, check Trackline for updates, and reload the Amtrak tab. If it still shows an older version, use the **Install Trackline** link above to reinstall the latest release.
 
 ### Notifications do not appear
 
