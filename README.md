@@ -21,7 +21,7 @@ Everything runs in your normal browser session. There is no server to start, no 
 4. Copy the complete contents of [`trackline-amtrak.user.js`](trackline-amtrak.user.js), paste it into the editor, and save.
 5. Allow browser notifications for Tampermonkey when prompted.
 
-After installation, the Trackline panel should appear in the lower-right corner of an Amtrak departure-results page. Its header should show **v0.5.2**.
+After installation, the Trackline panel should appear in the lower-right corner of an Amtrak departure-results page. Its header should show **v0.5.9**.
 
 ## Watch a trip
 
@@ -33,6 +33,8 @@ After installation, the Trackline panel should appear in the lower-right corner 
 6. Select **Start monitoring** and leave the Amtrak results tab open.
 
 Trackline immediately scans the complete result set and then reloads the tab at your chosen interval. It returns the results view to page 1 after each scan.
+
+Trackline accepts minute-precise time windows, recognizes Amtrak's common AM/PM spellings, supports “Multiple Trains” summary cards, and skips result pages that contain only cancelled or unavailable trains.
 
 ## Alerts
 

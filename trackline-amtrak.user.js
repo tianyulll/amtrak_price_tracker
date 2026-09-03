@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Trackline — Amtrak Fare Watch
 // @namespace    https://github.com/tianyulll/amtrak_price_tracker
-// @version      0.5.2
+// @version      0.5.9
 // @description  Scan all Amtrak result pages and notify when fares meet your target price.
 // @match        https://www.amtrak.com/tickets/departure.html*
 // @match        https://www.amtrak.com/*/tickets/departure.html*
@@ -16,7 +16,7 @@
   "use strict";
 
   const CARD_SELECTOR = '[amt-auto-test-id^="autoId-one-way-journey-solution-"]';
-  const SCRIPT_VERSION = "0.5.2";
+  const SCRIPT_VERSION = "0.5.9";
   const FARE_CLASSES = ["Coach", "Business", "First", "Private Rooms"];
   const STORAGE_KEY = "trackline-amtrak-v1";
   const TAB_STORAGE_KEY = "trackline-amtrak-tab-v1";
@@ -39,11 +39,11 @@
     if (start < 0) return null;
 
     for (let index = start + 1; index < Math.min(start + 5, lines.length); index += 1) {
-      const sameLine = lines[index].match(/^(\d{1,2}:\d{2})\s*([ap])(?:\.?m\.?)?$/i);
+      const sameLine = lines[index].match(/^(\d{1,2}:\d{2})\s*([ap])(?:\s*\.?\s*m\.?)?$/i);
       if (sameLine) return `${sameLine[1]} ${sameLine[2].toUpperCase()}M`;
 
       if (/^\d{1,2}:\d{2}$/.test(lines[index]) && index + 1 < lines.length) {
-        const meridiem = lines[index + 1].toLowerCase().replace(/\./g, "");
+        const meridiem = lines[index + 1].toLowerCase().replace(/[.\s]/g, "");
         if (["a", "p", "am", "pm"].includes(meridiem)) {
           return `${lines[index]} ${meridiem[0].toUpperCase()}M`;
         }
@@ -73,10 +73,16 @@
     const trainIndex = header.findIndex(
       (line, index) => index > 0 && /^[A-Za-z]?\d+[A-Za-z]?$/.test(line),
     );
-    if (trainIndex < 0) return [];
+    // Amtrak uses a summary card for itineraries spanning multiple trains. It
+    // has no numeric train number, but is still a readable fare result.
+    const multipleTrains = header.some((line, index) =>
+      /^Multiple\s+Trains$/i.test(line)
+      || (/^Multiple$/i.test(line) && /^Trains$/i.test(header[index + 1] || "")),
+    );
+    if (trainIndex < 0 && !multipleTrains) return [];
 
-    const trainNumber = header[trainIndex];
-    const routeName = header[trainIndex + 1] || "Amtrak";
+    const trainNumber = trainIndex >= 0 ? header[trainIndex] : "Multiple Trains";
+    const routeName = trainIndex >= 0 ? header[trainIndex + 1] || "Amtrak" : "Amtrak";
     const departureTime = timeAfter(lines, "DEPARTS");
     const arrivalTime = timeAfter(lines, "ARRIVES");
     if (!departureTime) return [];
@@ -183,7 +189,7 @@
 
   function clockMinutes(value) {
     if (!value) return null;
-    const twelveHour = String(value).trim().match(/^(\d{1,2}):(\d{2})\s*([ap])m$/i);
+    const twelveHour = String(value).trim().match(/^(\d{1,2}):(\d{2})\s*([ap])(?:\s*\.?\s*m\.?)?$/i);
     if (twelveHour) {
       let hour = Number(twelveHour[1]) % 12;
       if (twelveHour[3].toLowerCase() === "p") hour += 12;
@@ -307,6 +313,9 @@
   let minimumElement = null;
   let countdownElement = null;
   let scanInProgress = false;
+  let highlightedFareIdentities = new Set();
+  let highlightObserver = null;
+  let highlightUpdatePending = false;
 
   function defaultState() {
     return {
@@ -479,15 +488,6 @@
       if (currentTab.active) scheduleRefresh(currentTab, false);
     });
     tabState = saveWatchSettingsFromPanel();
-    for (const selector of [
-      ".tl-window-start-hour",
-      ".tl-window-start-minute",
-      ".tl-window-end-hour",
-      ".tl-window-end-minute",
-      ".tl-threshold",
-    ]) {
-      panel.querySelector(selector).addEventListener("change", updateWatchSettings);
-    }
     panel.querySelector(".tl-toggle").addEventListener("click", toggleMonitoring);
     panel.querySelector(".tl-minimize").addEventListener("click", toggleMinimized);
     panel.querySelector(".tl-head").addEventListener("pointerdown", beginPanelDrag);
@@ -595,16 +595,6 @@
       : null;
     saveTabState(tabState);
     return tabState;
-  }
-
-  async function updateWatchSettings() {
-    const tabState = saveWatchSettingsFromPanel();
-    if (!fareCards().length) return;
-    if (tabState.active) {
-      await scanPage({ userInitiated: true });
-    } else {
-      renderReadyFares(collectFares(), tabState);
-    }
   }
 
   function toast(message) {
@@ -723,11 +713,23 @@
 
   async function waitForPageChange(previousSignature, targetPage) {
     const startedAt = Date.now();
+    let emptyPageSince = null;
     while (Date.now() - startedAt < PAGE_CHANGE_TIMEOUT_MS) {
       const signature = firstCardSignature();
       if (signature && signature !== previousSignature) {
         await new Promise((resolve) => global.setTimeout(resolve, 150));
         return;
+      }
+      // A cancelled or sold-out page can legitimately have no visible fare
+      // card. Once Amtrak marks the requested page current, allow that empty
+      // state to settle instead of waiting forever for a card signature.
+      if (currentPageNumber() === targetPage) {
+        if (!signature) {
+          emptyPageSince ??= Date.now();
+          if (Date.now() - emptyPageSince >= 350) return;
+        } else {
+          emptyPageSince = null;
+        }
       }
       if (!previousSignature && signature && currentPageNumber() === targetPage) return;
       await new Promise((resolve) => global.setTimeout(resolve, 200));
@@ -767,13 +769,15 @@
     if (initialPageCount > 1) await goToResultsPage(1);
     const pageCount = paginationPageCount();
     const faresByKey = new Map();
+    const emptyPages = [];
     try {
       for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
         if (pageNumber > 1) await goToResultsPage(pageNumber);
         statusElement.textContent = `Scanning results page ${pageNumber} of ${pageCount}…`;
         const pageFares = collectFares();
         if (!pageFares.length) {
-          throw new Error(`No readable fares were found on Amtrak results page ${pageNumber}.`);
+          emptyPages.push(pageNumber);
+          continue;
         }
         for (const fare of pageFares) faresByKey.set(fare.key, fare);
       }
@@ -786,16 +790,43 @@
         }
       }
     }
-    return { fares: [...faresByKey.values()], pageCount };
+    return { fares: [...faresByKey.values()], pageCount, emptyPages };
   }
 
   function markAlertCards(alerts) {
-    const identities = new Set(alerts.map((alert) => `${alert.trainNumber}|${alert.departureTime}`));
+    highlightedFareIdentities = new Set(
+      alerts.map((alert) => `${alert.trainNumber}|${alert.departureTime}`),
+    );
+    applyHighlightsToVisibleCards();
+  }
+
+  function applyHighlightsToVisibleCards() {
     for (const card of fareCards()) {
       const fares = parseCardText(card.innerText);
-      const matched = fares.some((fare) => identities.has(`${fare.trainNumber}|${fare.departureTime}`));
+      const matched = fares.some((fare) =>
+        highlightedFareIdentities.has(`${fare.trainNumber}|${fare.departureTime}`),
+      );
       card.classList.toggle("trackline-alert", matched);
     }
+  }
+
+  function observeResultPageChanges() {
+    if (highlightObserver) return;
+    highlightObserver = new MutationObserver((mutations) => {
+      if (mutations.every((mutation) => panel?.contains(mutation.target))) return;
+      if (highlightUpdatePending) return;
+      highlightUpdatePending = true;
+      global.requestAnimationFrame(() => {
+        highlightUpdatePending = false;
+        applyHighlightsToVisibleCards();
+      });
+    });
+    highlightObserver.observe(doc.body, {
+      attributes: true,
+      attributeFilter: ["aria-label", "class", "hidden", "style"],
+      childList: true,
+      subtree: true,
+    });
   }
 
   function windowDescription(tabState) {
@@ -884,7 +915,7 @@
       time.textContent = formatTime24(fare.departureTime);
       const detail = doc.createElement("div");
       detail.className = "tl-result-detail";
-      detail.textContent = `Train ${fare.trainNumber} · ${fare.fareClass}`;
+      detail.textContent = `${fare.trainNumber === "Multiple Trains" ? fare.trainNumber : `Train ${fare.trainNumber}`} · ${fare.fareClass}`;
       const price = doc.createElement("div");
       price.className = "tl-result-price";
       price.textContent = money(fare.price);
@@ -914,6 +945,12 @@
       : `Minimum fare in selected window: ${money(minimum)}`;
   }
 
+  function skippedPagesDescription(emptyPages) {
+    if (!emptyPages?.length) return "";
+    const labels = emptyPages.join(", ");
+    return ` · skipped page${emptyPages.length === 1 ? "" : "s"} ${labels} (no priced fares)`;
+  }
+
   async function scanPage({ userInitiated = false, manual = false } = {}) {
     if (scanInProgress) {
       if (userInitiated) toast("A full results scan is already running.");
@@ -932,11 +969,19 @@
       scanInProgress = false;
       panel.querySelector(".tl-check").disabled = false;
     }
-    const { fares: allFares, pageCount } = aggregate;
+    const { fares: allFares, pageCount, emptyPages } = aggregate;
     if (!allFares.length) {
+      minimumElement.hidden = true;
+      minimumElement.textContent = "";
       statusElement.textContent = "No readable fares found";
-      detailElement.textContent = "Trackline will wait; monitoring state was left unchanged.";
-      if (userInitiated) toast("No fare cards are visible yet.");
+      detailElement.textContent = emptyPages.length
+        ? `All ${pageCount} result pages had no priced fares (cancelled or unavailable trains). Monitoring state was left unchanged.`
+        : "Trackline will wait; monitoring state was left unchanged.";
+      if (userInitiated) {
+        toast(emptyPages.length
+          ? "No priced fares were found on the scanned pages; cancelled or unavailable trains may be shown."
+          : "No fare cards are visible yet.");
+      }
       return false;
     }
 
@@ -952,7 +997,7 @@
     renderMinimumFare(fares);
     renderScanResults(matches);
     if (manual) {
-      statusElement.textContent = `${matches.length} matching ${matches.length === 1 ? "fare" : "fares"} · ${pageCount} ${pageCount === 1 ? "page" : "pages"} scanned · ${timeLabel(Date.now())}`;
+      statusElement.textContent = `${matches.length} matching ${matches.length === 1 ? "fare" : "fares"} · ${pageCount} ${pageCount === 1 ? "page" : "pages"} scanned${skippedPagesDescription(emptyPages)} · ${timeLabel(Date.now())}`;
       detailElement.textContent = `${context.label} · ${windowDescription(tabState)} · manual scan`;
       markAlertCards(matches);
       return true;
@@ -977,7 +1022,7 @@
     touchContext(state, context);
     saveState(state);
 
-    statusElement.textContent = `${matches.length} matching ${matches.length === 1 ? "fare" : "fares"} · ${pageCount} ${pageCount === 1 ? "page" : "pages"} scanned · ${timeLabel(Date.now())}`;
+    statusElement.textContent = `${matches.length} matching ${matches.length === 1 ? "fare" : "fares"} · ${pageCount} ${pageCount === 1 ? "page" : "pages"} scanned${skippedPagesDescription(emptyPages)} · ${timeLabel(Date.now())}`;
     detailElement.textContent = context.travelDate
       ? `${context.label} · ${windowDescription(tabState)}`
       : `${context.label} · ${windowDescription(tabState)} · date not detected; use a fresh tab for another trip`;
@@ -987,7 +1032,7 @@
       const cheapest = [...matches].sort((left, right) => left.price - right.price)[0];
       const title = matches.length === 1 ? "Amtrak target fare found" : "Amtrak target fares found";
       const text = cheapest
-        ? `${matches.length} ${matches.length === 1 ? "fare is" : "fares are"} at or below ${money(tabState.priceThreshold)}. Lowest: Train ${cheapest.trainNumber} · ${formatTime24(cheapest.departureTime)} · ${cheapest.fareClass} · ${money(cheapest.price)}.`
+        ? `${matches.length} ${matches.length === 1 ? "fare is" : "fares are"} at or below ${money(tabState.priceThreshold)}. Lowest: ${cheapest.trainNumber === "Multiple Trains" ? cheapest.trainNumber : `Train ${cheapest.trainNumber}`} · ${formatTime24(cheapest.departureTime)} · ${cheapest.fareClass} · ${money(cheapest.price)}.`
         : `${thresholdHits.length} new fares meet your target of ${money(tabState.priceThreshold)}.`;
       void notify(title, text);
     }
@@ -1073,6 +1118,7 @@
   function initialize() {
     addStyles();
     buildPanel();
+    observeResultPageChanges();
     waitForResults();
     try {
       GM_registerMenuCommand("Trackline: scan fares now", () => {

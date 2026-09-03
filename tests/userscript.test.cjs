@@ -39,6 +39,46 @@ Private Rooms
 Not Offered
 `;
 
+const MULTIPLE_TRAINS_CARD = `
+BOS → PHL
+Multiple Trains
+DEPARTS
+12:50p
+12h 1m
+3 Segment
+ARRIVES
+12:51a
+Trip Details
+Coach
+from
+$
+112
+Business
+from
+$
+162
+Private Rooms
+from
+$
+373
+`;
+
+const CANCELLED_CARD = `
+BOS → PHL
+Northeast Regional
+DEPARTS
+12:50p
+ARRIVES
+12:51a
+Trip Details
+Coach
+Cancelled
+Business
+Cancelled
+Private Rooms
+Not Offered
+`;
+
 test("parses each offered fare class from an Amtrak card", () => {
   const fares = parseCardText(CARD);
   assert.deepEqual(
@@ -47,6 +87,24 @@ test("parses each offered fare class from an Amtrak card", () => {
   );
   assert.equal(fares[0].trainNumber, "179");
   assert.equal(fares[0].departureTime, "12:11 AM");
+});
+
+test("parses multi-train summary cards without a numeric train number", () => {
+  const fares = parseCardText(MULTIPLE_TRAINS_CARD);
+  assert.deepEqual(
+    fares.map((fare) => [fare.trainNumber, fare.fareClass, fare.price]),
+    [
+      ["Multiple Trains", "Coach", 112],
+      ["Multiple Trains", "Business", 162],
+      ["Multiple Trains", "Private Rooms", 373],
+    ],
+  );
+  assert.equal(fares[0].departureTime, "12:50 PM");
+  assert.equal(fares[0].arrivalTime, "12:51 AM");
+});
+
+test("treats a cancelled card with no prices as an empty fare page", () => {
+  assert.deepEqual(parseCardText(CANCELLED_CARD), []);
 });
 
 test("normalizes numeric and named travel dates", () => {
@@ -62,6 +120,8 @@ test("filters departures within normal and overnight windows", () => {
     { departureTime: "1:15 AM" },
   ];
   assert.equal(clockMinutes("12:00 AM"), 0);
+  assert.equal(clockMinutes("11:30 p"), 23 * 60 + 30);
+  assert.equal(clockMinutes("11:30 p.m."), 23 * 60 + 30);
   assert.deepEqual(filterFaresByWindow(fares, "6", "6"), [fares[0], fares[1]]);
   assert.deepEqual(filterFaresByWindow(fares, "06:15", "06:50"), [fares[1]]);
   assert.deepEqual(filterFaresByWindow(fares, "22", "2"), [fares[2], fares[3]]);
@@ -70,6 +130,22 @@ test("filters departures within normal and overnight windows", () => {
   assert.equal(formatTime24("11:30 PM"), "23:30");
   assert.equal(windowMinuteValue("6:05"), "05");
   assert.equal(windowMinuteValue(""), "00");
+});
+
+test("filters AM/PM departures to the exact 24-hour minute window", () => {
+  const fares = [
+    { departureTime: "5:17 PM", price: 26 },
+    { departureTime: "7:53 PM", price: 25 },
+    { departureTime: "11:00 PM", price: 25 },
+    { departureTime: "11:01 PM", price: 25 },
+    { departureTime: "11:58 PM", price: 25 },
+  ];
+  assert.deepEqual(
+    filterFaresForManualScan(fares, "09:00", "23:00", 30),
+    [fares[0], fares[1], fares[2]],
+  );
+  const dottedCard = parseCardText(CARD.replace("12:11\na", "11:58 p.m."));
+  assert.equal(dottedCard[0].departureTime, "11:58 PM");
 });
 
 test("alerts once at the target and again only after crossing back below", () => {
@@ -128,4 +204,18 @@ test("manual scans apply both the hour window and optional price ceiling", () =>
   assert.deepEqual(filterFaresForManualScan(fares, "22", "2", null), [fares[1], fares[2]]);
   assert.equal(minimumFarePrice(filterFaresByWindow(fares, "22", "2")), 20);
   assert.equal(minimumFarePrice([]), null);
+});
+
+test("manual scan boundaries include the exact end minute but exclude later departures", () => {
+  const fares = [
+    { departureTime: "17:17", price: 26 },
+    { departureTime: "19:53", price: 25 },
+    { departureTime: "23:00", price: 25 },
+    { departureTime: "23:01", price: 25 },
+    { departureTime: "23:58", price: 25 },
+  ];
+  assert.deepEqual(
+    filterFaresForManualScan(fares, "09:00", "23:00", 30),
+    [fares[0], fares[1], fares[2]],
+  );
 });
